@@ -17,7 +17,9 @@ APPID=3525620
 PREFIX="${WSR_PREFIX:-$HOME/.steam/steam/steamapps/compatdata/$APPID/pfx}"
 OVERLAY="$PREFIX/drive_c/users/steamuser/AppData/Local/Wall Street Raider/workshop/overlay"
 INSTALL="${WSR_INSTALL:-$HOME/.steam/steam/steamapps/common/Wall Street Raider/resources/app}"
-SRC="$(cd "$(dirname "$0")" && pwd)/overlay"
+DOCS="$PREFIX/drive_c/users/steamuser/Documents/WSR Mods"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SRC="$HERE/overlay"
 MODE="${1:-overlay}"
 
 case "$MODE" in
@@ -44,6 +46,22 @@ case "$MODE" in
     echo "Staged overlay -> $OVERLAY"
     echo "NOTE: under Proton this is usually wiped on launch (Steam API not loaded). Use --install."
     ;;
+  --workshop)
+    # Stage the publishable content + preview where the Mod Uploader's pickers default to
+    # (the Proton prefix's Documents\WSR Mods\). Content goes in its own folder; the preview
+    # sits in the parent so it isn't published as mod content.
+    DEST="$DOCS/WSR Spreadsheet Export"
+    mkdir -p "$DEST"
+    if command -v rsync >/dev/null 2>&1; then rsync -a "$SRC"/ "$DEST"/; else cp -r "$SRC"/. "$DEST"/; fi
+    cp "$HERE/workshop/preview.png" "$DOCS/preview.png"
+    # Preserve the published-item id across re-publishes (commit workshop/.wsrmod-id to keep it).
+    [ -f "$HERE/workshop/.wsrmod-id" ] && cp "$HERE/workshop/.wsrmod-id" "$DEST/.wsrmod-id"
+    echo "Staged Workshop package:"
+    echo "  mod folder (pick this):    $DEST"
+    echo "  preview image (pick this): $DOCS/preview.png"
+    echo "Now launch the WSR Mod Uploader and publish (see PUBLISHING.md)."
+    echo "After publishing, copy the new .wsrmod-id back: cp \"$DEST/.wsrmod-id\" \"$HERE/workshop/.wsrmod-id\""
+    ;;
   *)
-    echo "Usage: ./deploy.sh [--install | --uninstall]   (no arg = overlay)" >&2; exit 1 ;;
+    echo "Usage: ./deploy.sh [--install | --uninstall | --workshop]   (no arg = overlay)" >&2; exit 1 ;;
 esac
