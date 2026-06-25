@@ -207,3 +207,8 @@ export function buildWorkbook(entities) {
 export function workbookBuffer(wb) {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
+
+// Browser-friendly serialization (Uint8Array) for a Blob download when there is no Node fs.
+export function workbookArray(wb) {
+    return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+}

@@ -7,7 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-    companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer, monthStr,
+    companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
+    workbookArray, monthStr,
 } from '../overlay/js/wsr-export/exporter.js';
 
 let failures = 0;
@@ -58,6 +59,13 @@ const wb = buildWorkbook(entities);
 const buf = workbookBuffer(wb);
 ok(buf && buf.length > 0, `workbook buffer produced (${buf.length} bytes)`);
 ok(buf.slice(0, 2).toString('latin1') === 'PK', 'workbook is a ZIP (xlsx) container (PK magic)');
+
+// browser-mode serialization (for a Blob download) must also be valid xlsx bytes.
+// SheetJS type:'array' returns an ArrayBuffer (Blob accepts it directly).
+const arr = workbookArray(wb);
+const bytes = arr instanceof Uint8Array ? arr : new Uint8Array(arr);
+ok(bytes.length > 0, `workbookArray produced ${bytes.length} bytes (${arr.constructor.name})`);
+ok(bytes[0] === 0x50 && bytes[1] === 0x4b, 'browser array output is a ZIP (xlsx) container (PK magic)');
 
 const outDir = process.env.WSR_TEST_OUT || path.join(process.cwd(), 'out');
 fs.mkdirSync(outDir, { recursive: true });

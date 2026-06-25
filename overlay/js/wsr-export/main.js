@@ -11,7 +11,8 @@
 
 import * as api from '../api.js';
 import {
-    companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer, monthStr,
+    companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
+    workbookArray, monthStr,
 } from './exporter.js';
 
 const hasRequire = typeof require !== 'undefined';
@@ -29,7 +30,6 @@ const outDir = () => path.join(os.homedir(), 'Documents', 'WSR Statements');
 
 function requireGameLoaded(gs) {
     if (!gs || !gs.currentYear) throw new Error('No game loaded - load a save first.');
-    if (!fs) throw new Error('File saving needs the desktop game (browser mode cannot write files).');
 }
 
 // One {sheet, rows, summary} descriptor from a store snapshot for the entity currently in view.
@@ -47,13 +47,28 @@ function entityFrom(gs) {
     return { sheet: sym, rows: companyRows(aef, aed, ind, date), summary: companySummary(aef, aed, ind) };
 }
 
-function writeWorkbook(entities, baseName) {
+// Save the workbook. Desktop (Electron, Node available) -> write to ~/Documents/WSR Statements.
+// Browser mode (no Node) -> trigger a browser download. Returns a user-facing status string.
+function saveWorkbook(entities, baseName) {
     const wb = buildWorkbook(entities);
-    const buf = workbookBuffer(wb);
-    fs.mkdirSync(outDir(), { recursive: true });
-    const file = path.join(outDir(), `${baseName}.xlsx`);
-    fs.writeFileSync(file, buf);
-    return file;
+    const filename = `${baseName}.xlsx`;
+    if (fs && path && os) {
+        const dir = outDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, filename);
+        fs.writeFileSync(file, workbookBuffer(wb));
+        return 'Saved: ' + file;
+    }
+    // Browser mode: build a Blob and click a temporary download link.
+    const blob = new Blob([workbookArray(wb)],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    return 'Downloaded: ' + filename + ' (check your browser downloads)';
 }
 
 async function exportCurrent() {
@@ -61,7 +76,7 @@ async function exportCurrent() {
     requireGameLoaded(gs);
     const ent = entityFrom(gs);
     const tag = isPlayerNum(gs.activeEntityNum) ? 'player' : ent.sheet;
-    return writeWorkbook([ent], `wsr_financials_${monthStr(gs)}_${tag}`);
+    return saveWorkbook([ent], `wsr_financials_${monthStr(gs)}_${tag}`);
 }
 
 async function exportPortfolio() {
@@ -91,7 +106,7 @@ async function exportPortfolio() {
 
     // Restore the user's original view.
     if (original != null) { await api.setViewAsset(original); await sleep(120); }
-    return writeWorkbook(entities, `wsr_financials_${date}`);
+    return saveWorkbook(entities, `wsr_financials_${date}`);
 }
 
 // ---- UI ----
@@ -116,8 +131,8 @@ function mkButton(label, handler) {
         const old = b.textContent;
         b.disabled = true; b.textContent = 'Exporting...';
         try {
-            const file = await handler();
-            toast('Saved: ' + file);
+            const msg = await handler();
+            toast(msg);
         } catch (e) {
             toast('Export failed: ' + (e && e.message ? e.message : String(e)), true);
             console.error('[wsr-export]', e);
