@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Wall $treet Raider</title>
+    <script>
+      // Apply persisted theme before the stylesheet paints, so non-default
+      // themes don't flash the fresh-install default on load. Per-machine
+      // pref via localStorage. Two special values:
+      //   'justin'         — the :root cascade (original WSR look, was "Dark")
+      //   'sole-proprietor' — the fresh-install default when no pref is set
+      // Justin is applied by REMOVING the attribute; everything else sets it.
+      try {
+        var t = localStorage.getItem('wsr_theme');
+        // Migrations from earlier value names.
+        if (t === 'malor') {
+          t = 'light';
+          try { localStorage.setItem('wsr_theme', 'light'); } catch (_) {}
+        }
+        if (t === 'dark') {
+          t = 'justin';
+          try { localStorage.setItem('wsr_theme', 'justin'); } catch (_) {}
+        }
+        // Fresh install — no localStorage entry. Default to Justin (the :root cascade).
+        if (!t) t = 'justin';
+        // 'justin' uses the :root cascade; no attribute needed.
+        if (t !== 'justin') document.documentElement.setAttribute('data-theme', t);
+      } catch (_) { /* localStorage unavailable - cascade renders Justin (the :root values) */ }
+    </script>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+    <div id="app"></div>
+
+    <script>
+      // Phone/remote-host access: api.js reads ?restPort=N&wsPort=M from
+      // location.search (backend ports are OS-assigned; the remote browser
+      // can't read the local runtime.json handshake file). Nothing to do
+      // here — this block used to set __WSR_API_BASE_OVERRIDE to a hardcoded
+      // :9631, which no longer works now that ports are dynamic.
+    </script>
+    <script type="module" src="./js/app.js"></script>
+    <!-- WSR Spreadsheet Export mod: adds floating "Export to Excel" buttons. -->
+    <script type="module" src="./js/wsr-export/main.js"></script>
+</body>
+
+</html>

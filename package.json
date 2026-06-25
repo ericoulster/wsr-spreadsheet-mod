@@ -1,0 +1,10 @@
+{
+  "name": "wsr-spreadsheet-mod",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "In-game Wall Street Raider mod: floating buttons that export balance sheets + cash flow to Excel. (This package.json is for headless Node tests only; it is NOT part of the shipped overlay/.)",
+  "scripts": {
+    "test": "node test/test_exporter.mjs"
+  }
+}
