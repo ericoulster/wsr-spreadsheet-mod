@@ -1,8 +1,42 @@
 # Publishing to the Steam Workshop
 
-The mod is published with the **WSR Mod Uploader** (a separate tool bundled with the game). A Workshop
-item is just the `resources/app/`-shaped content folder (our `overlay/`) plus Steam metadata you enter
-in the uploader. No manifest file is needed inside the folder.
+A Workshop item is just the `resources/app/`-shaped content folder (our `overlay/`) plus Steam
+metadata. Two ways to publish it:
+
+- **SteamCMD (recommended on Linux/Proton)** - the section just below. The bundled Mod Uploader's
+  embedded Steam API does not initialize under Proton (it exits 0 with no output), so use this.
+- **WSR Mod Uploader (Windows)** - the GUI flow further down.
+
+---
+
+## SteamCMD (native, bypasses the Proton uploader)
+
+One command, after SteamCMD is installed (Valve tarball at `~/steamcmd/`, no sudo):
+
+```
+workshop/publish.sh <your_steam_username>            # default: private (only you see it)
+workshop/publish.sh <your_steam_username> public     # when you're ready to share
+```
+
+Run it from your own terminal - the first run prompts for your Steam password + Steam Guard code
+(SteamCMD logs in separately from the desktop client; the session is cached afterward). The script
+generates the Workshop VDF (appid 3525620, `overlay/` as content, `workshop/preview.png`, title +
+description) and runs `steamcmd +workshop_build_item`. On success it prints the Workshop item id and
+saves it to `workshop/.published-id`, so re-running **updates the same item**.
+
+After the first publish of a NEW item, open its item page and **accept the Steam Workshop Legal
+Agreement** (`steamcommunity.com/sharedfiles/workshoplegalagreement`) - until you do, a new item stays
+hidden. Then flip visibility to `public` and re-run to share it.
+
+Edit the title/description in `workshop/publish.sh`; the preview is `workshop/preview.png`.
+
+---
+
+## WSR Mod Uploader (Windows GUI)
+
+The Mod Uploader is bundled with the game; it publishes the same content folder with metadata you enter
+in its UI. No manifest file is needed inside the folder. (On Linux/Proton it can't reach Steam - use
+SteamCMD above.)
 
 ## 1. Stage the package
 
