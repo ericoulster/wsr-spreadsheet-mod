@@ -212,3 +212,31 @@ export function workbookBuffer(wb) {
 export function workbookArray(wb) {
     return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 }
+
+// Parse an engine report text array (the itemized cash-flow projection) into [kind,label,value] rows.
+// Lines look like "  Business Loans Interest Income:        562523"; headers end in ":" with no number;
+// "----"/"====" are separators; the engine pads with blanks + a trailing prose disclaimer (skipped).
+// Strips any trailing @-hyperlink token the engine may append, and commas inside numbers.
+export function parseProjection(lines) {
+    const rows = [];
+    const valRe = /^(.+?)\s+(-?[\d,]+(?:\.\d+)?)$/;   // "label   number"
+    const totalRe = /^(TOTAL|NET|PROJECTED|ESTIMATED|ADJUSTED|AFTER-TAX|TENTATIVE|GRAND)\b/i;
+    let lastBlank = true;                              // suppress leading / duplicate blank rows
+    for (const raw of (lines || [])) {
+        const line = String(raw == null ? '' : raw).replace(/@[A-Za-z]\w*\s*$/, '').trim();
+        if (!line || /^[-=\s]+$/.test(line)) continue;            // blank or separator rule
+        const m = line.match(valRe);
+        if (m) {
+            const label = m[1].replace(/:$/, '').trim();
+            const n = parseFloat(m[2].replace(/,/g, ''));
+            rows.push([totalRe.test(label) ? 'total' : 'line', label, isNaN(n) ? m[2] : n]);
+            lastBlank = false;
+        } else if (line.endsWith(':')) {                           // a section header
+            if (!lastBlank) { rows.push(['blank', '', '']); }
+            rows.push(['sub', line.replace(/:$/, '').trim(), '']);
+            lastBlank = false;
+        }
+        // else: report title / prose disclaimer -> skip
+    }
+    return rows;
+}

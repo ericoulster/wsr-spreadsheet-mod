@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
-    workbookArray, monthStr,
+    workbookArray, monthStr, parseProjection,
 } from '../overlay/js/wsr-export/exporter.js';
 
 let failures = 0;
@@ -50,6 +50,37 @@ const reg = { totalAssets: 1000, totalDebt: 200, hidReserve: 10, equity: 790, ca
 const regRows = companyRows(reg, { name: 'Acme', symbol: 'ACME' }, 0, date);
 ok(val(regRows, 'Total Liabilities') === 210, `regular co Total Liabilities (${val(regRows, 'Total Liabilities')}) == 210`);
 ok(Math.abs(val(regRows, 'Balance check: Assets - Liabilities - Equity (~0)')) < 0.05, 'regular co balance check ~= 0');
+
+// ---- 2b. parseProjection: itemized cash-flow report -> rows, vs the on-screen numbers ----
+const PROJ = [
+    '        3-MONTH CASH FLOW PROJECTION FOR CANADIAN WESTERN BANK',
+    '        ----------------------------------------------------',
+    '',
+    'TAXABLE INCOME ITEMS (IN MILLIONS OF U.S. DOLLARS):',
+    '    Business Loans Interest Income:           562523',
+    '    Consumer Loan Interest:                  1345765',
+    '    Profit or Loss-Interest Rate Swaps:         5000',
+    '                                          -----------------',
+    'TOTAL TAXABLE INCOME ITEMS:                  4112751',
+    '',
+    '    Less: Amortization of Bond Discount:     -383617',
+    'PROJECTED 3-MONTH CASH FLOW:                 5016335',
+    'ESTIMATED CASH & EQUIV. IN 3 MONTHS:        23474573',
+    '',
+    '        Projected cash flow does not not take into account frequent bond trading.',
+    ...Array(1500).fill(''),
+];
+const pr = parseProjection(PROJ);
+const prRow = (label) => pr.find(([, l]) => l === label);
+ok(prRow('Business Loans Interest Income')?.[2] === 562523, 'proj income item parsed (562523)');
+ok(prRow('Consumer Loan Interest')?.[2] === 1345765, 'proj consumer interest (1345765)');
+ok(prRow('Less: Amortization of Bond Discount')?.[2] === -383617, 'proj negative value (-383617)');
+ok(prRow('TOTAL TAXABLE INCOME ITEMS')?.[0] === 'total' && prRow('TOTAL TAXABLE INCOME ITEMS')?.[2] === 4112751, 'proj total row classified + valued');
+ok(prRow('ESTIMATED CASH & EQUIV. IN 3 MONTHS')?.[2] === 23474573, 'proj estimated cash (23474573)');
+ok(pr.some(([k, l]) => k === 'sub' && l.startsWith('TAXABLE INCOME ITEMS')), 'proj section header captured');
+ok(!pr.some(([, l]) => String(l).includes('does not not take')), 'proj prose disclaimer skipped');
+ok(!pr.some(([, l]) => String(l).includes('PROJECTION FOR CANADIAN')), 'proj report title skipped');
+ok(pr.filter(([k]) => k === 'line' || k === 'total').length === 7, `proj kept every value row, 7 of 7 (got ${pr.filter(([k]) => k === 'line' || k === 'total').length})`);
 
 // ---- 3. Assemble + write a workbook (exercises SheetJS xlsx generation) ----
 const entities = [

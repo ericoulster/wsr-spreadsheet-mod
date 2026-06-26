@@ -12,7 +12,7 @@
 import * as api from '../api.js';
 import {
     companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
-    workbookArray, monthStr,
+    workbookArray, monthStr, parseProjection,
 } from './exporter.js';
 
 const hasRequire = typeof require !== 'undefined';
@@ -49,6 +49,39 @@ function flattenTreeIds(tree, acc = []) {
         flattenTreeIds(child, acc);
     }
     return acc;
+}
+
+// Trigger the itemized cash-flow projection report for the entity in view and return its text lines.
+// setActiveUIReport recomputes the report for the active entity; the text arrives on a later
+// broadcast (like the in-game "View Breakdown"), so poll gameState.cashflowProjection until it's a
+// refreshed cash-flow report (changed from before, or whose header names this entity). null on timeout.
+async function captureProjectionLines(reportId, name) {
+    if (reportId == null) return null;
+    const before = (gstate().cashflowProjection || []).join('\n');
+    const nameU = String(name || '').toUpperCase();
+    try { await api.setActiveUIReport(reportId); } catch (e) { console.warn('[wsr-export] setActiveUIReport failed', e); return null; }
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+        const text = (gstate().cashflowProjection || []).join('\n');
+        if (text.trim() && /CASH\s*FLOW/i.test(text) && (text !== before || (nameU && text.toUpperCase().includes(nameU)))) {
+            await sleep(40);
+            return gstate().cashflowProjection || [];
+        }
+        await sleep(60);
+    }
+    return null;
+}
+
+// Append the itemized 3-month cash-flow projection as a section on an entity's rows (best-effort;
+// a failure just omits the section). `name` is used to confirm the report refreshed for this entity.
+async function appendProjection(entity, isPlayer, name) {
+    const reportId = isPlayer ? api.UI_PLAYER_CASH_FLOW_PROJECTION : api.UI_CORP_CASH_FLOW_PROJECTION;
+    const lines = await captureProjectionLines(reportId, name);
+    if (!lines) return;
+    const projRows = parseProjection(lines);
+    if (!projRows.length) return;
+    entity.rows.push(['blank', '', ''], ['section', 'ITEMIZED 3-MONTH CASH FLOW PROJECTION ($M)', '']);
+    for (const r of projRows) entity.rows.push(r);
 }
 
 function requireGameLoaded(gs) {
@@ -94,11 +127,14 @@ function saveWorkbook(entities, baseName) {
     return 'Downloaded: ' + filename + ' (check your browser downloads)';
 }
 
-async function exportCurrent() {
+async function exportCurrent(setStatus) {
     const gs = gstate();
     requireGameLoaded(gs);
+    const isP = isPlayerNum(gs.activeEntityNum);
     const ent = entityFrom(gs);
-    const tag = isPlayerNum(gs.activeEntityNum) ? 'player' : ent.sheet;
+    if (setStatus) setStatus('Reading cash flow...');
+    await appendProjection(ent, isP, (gs.activeEntityData || {}).name || gs.playerName);
+    const tag = isP ? 'player' : ent.sheet;
     return saveWorkbook([ent], `wsr_financials_${monthStr(gs)}_${tag}`);
 }
 
@@ -135,6 +171,7 @@ async function exportPortfolio(setStatus) {
     } catch (e) { console.warn('[wsr-export] subsidiaries tree unavailable:', e); }
 
     const entities = [{ sheet: 'PLAYER', rows: playerRows(aep, gs, pname, date), summary: playerSummary(aep, gs, pname) }];
+    await appendProjection(entities[0], true, pname);   // itemized cash-flow projection (still viewing the player)
     const missed = [];
     const total = ids.length + 1;
     let done = 1;
@@ -153,7 +190,9 @@ async function exportPortfolio(setStatus) {
         const aef = gs.activeEntityFinancials || {};
         const ind = aed.industryId ?? gs.activeIndustryId ?? -1;
         const sym = aed.symbol || aed.name || String(id);
-        entities.push({ sheet: sym, rows: companyRows(aef, aed, ind, date), summary: companySummary(aef, aed, ind) });
+        const entity = { sheet: sym, rows: companyRows(aef, aed, ind, date), summary: companySummary(aef, aed, ind) };
+        await appendProjection(entity, false, aed.name || sym);   // itemized cash-flow projection (still in view)
+        entities.push(entity);
     }
 
     // Restore the user's original view.
