@@ -71,8 +71,13 @@ echo "Publishing to WSR Workshop (visibility=${2:-private}, item id ${PUBID}) ..
 # Don't let a non-zero SteamCMD exit (it sometimes returns one even on success) abort before we
 # parse + save the id.
 set +e
-OUT="$("$STEAMCMD" +login "$USER_ARG" +workshop_build_item "$VDF" +quit 2>&1 | tee /dev/tty)"
-set -e
+if [ -t 1 ]; then
+    OUT="$("$STEAMCMD" +login "$USER_ARG" +workshop_build_item "$VDF" +quit 2>&1 | tee /dev/tty)"
+else
+    OUT="$("$STEAMCMD" +login "$USER_ARG" +workshop_build_item "$VDF" +quit 2>&1)"; printf '%s\n' "$OUT"
+fi
+# NOTE: keep errexit OFF for the rest - the id-parse greps below return non-zero on an UPDATE
+# (no "PublishFileID" line) and, with pipefail, would otherwise abort before we save/confirm.
 # SteamCMD prints "Create new workshop item ( PublishFileID NNNN)" (note: PublishFileID, no "ed");
 # updates don't reprint it, so fall back to the known id.
 NEWID="$(printf '%s\n' "$OUT" | grep -oiE 'Publish(ed)?FileID[^0-9]*[0-9]+' | grep -oE '[0-9]+' | tail -1)"
