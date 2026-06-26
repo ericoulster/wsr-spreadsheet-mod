@@ -148,10 +148,20 @@ function injectButtons() {
     const bar = document.createElement('div');
     bar.id = 'wsr-export-bar';
     bar.style.cssText = `position:fixed; right:14px; bottom:14px; z-index:100000;
-        display:flex; gap:6px; align-items:center;`;
+        display:none; gap:6px; align-items:center;`;
     bar.appendChild(mkButton('Export This', exportCurrent));
     bar.appendChild(mkButton('Export Portfolio', exportPortfolio));
     document.body.appendChild(bar);
+
+    // Only show in-game: mirror the app's own gameLoaded flag (app.js renders GameUI vs MainMenu
+    // on it), so the buttons stay hidden on the title/menu screen.
+    let shown = null;
+    const sync = () => {
+        const loaded = !!(api.gameStore.getState().gameState || {}).gameLoaded;
+        if (loaded !== shown) { shown = loaded; bar.style.display = loaded ? 'flex' : 'none'; }
+    };
+    sync();
+    api.gameStore.subscribe(sync);
     console.log('[wsr-export] export buttons injected');
 }
 

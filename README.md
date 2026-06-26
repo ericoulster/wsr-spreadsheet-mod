@@ -80,3 +80,11 @@ npm test            # node test/test_exporter.mjs
 - The spreadsheet lists every line item for an entity's industry (including zeros the on-screen view
   hides for space), so columns stay consistent across entities.
 - After a game update, re-run `./deploy.sh --install` (an update restores stock files).
+
+## License
+
+[MIT](LICENSE) for this mod's code - use, copy, modify, and redistribute freely with attribution.
+The bundled `overlay/js/lib/xlsx.mjs` is [SheetJS](https://sheetjs.com) (community build) under its
+own Apache-2.0 license; its copyright header is retained in the file.
+
+A fan-made, unofficial utility - not affiliated with or endorsed by the makers of Wall $treet Raider.

@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
     companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
     workbookArray, monthStr,
@@ -15,8 +16,9 @@ let failures = 0;
 const ok = (cond, msg) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${msg}`); if (!cond) failures += 1; };
 const val = (rows, label) => { const r = rows.find(([, l]) => l === label); return r ? r[2] : undefined; };
 
-// ---- 1. Player path from the real captured gamestate ----
-const fixturePath = '/home/hq/Documents/DevWork/wsr-forecast/data/final_gamestate.json';
+// ---- 1. Player path from a captured gamestate (bundled synthetic fixture; override with WSR_GAMESTATE) ----
+const here = path.dirname(fileURLToPath(import.meta.url));
+const fixturePath = process.env.WSR_GAMESTATE || path.join(here, 'fixtures', 'player_gamestate.json');
 const gs = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 const aep = gs.activeEntityPlayerFinancials || {};
 const date = monthStr(gs);
