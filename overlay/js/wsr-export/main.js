@@ -114,7 +114,7 @@ async function exportPortfolio() {
 function toast(msg, isError) {
     const t = document.createElement('div');
     t.textContent = msg;
-    t.style.cssText = `position:fixed; right:14px; bottom:64px; z-index:100000; max-width:460px;
+    t.style.cssText = `position:fixed; right:14px; bottom:112px; z-index:100000; max-width:460px;
         padding:8px 12px; border-radius:6px; font-size:13px; color:#fff; white-space:pre-wrap;
         background:${isError ? '#9a3434' : '#244a66'}; box-shadow:0 2px 10px rgba(0,0,0,.45);`;
     document.body.appendChild(t);
@@ -147,7 +147,7 @@ function injectButtons() {
     if (document.getElementById('wsr-export-bar')) return;
     const bar = document.createElement('div');
     bar.id = 'wsr-export-bar';
-    bar.style.cssText = `position:fixed; right:14px; bottom:14px; z-index:100000;
+    bar.style.cssText = `position:fixed; right:14px; bottom:64px; z-index:100000;
         display:none; gap:6px; align-items:center;`;
     bar.appendChild(mkButton('Export This', exportCurrent));
     bar.appendChild(mkButton('Export Portfolio', exportPortfolio));
