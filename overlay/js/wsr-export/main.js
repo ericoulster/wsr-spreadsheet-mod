@@ -20,13 +20,36 @@ const fs = hasRequire ? require('fs') : null;
 const path = hasRequire ? require('path') : null;
 const os = hasRequire ? require('os') : null;
 
-const PLAYER_ID = 2;     // the human player's entity id (PLAYER1); matches the captures + CLI
-const SETTLE_MS = 350;   // wait after setViewAsset for the financials broadcast (CLI used 300ms)
+const PLAYER_ID = 2;          // fallback human-player entity id; prefer gameState.playerId
+const VIEW_TIMEOUT_MS = 4000; // max wait for a view switch to actually land in the engine
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const gstate = () => (api.gameStore.getState().gameState || {});
 const isPlayerNum = (n) => n > 0 && n <= 10;
 const outDir = () => path.join(os.homedir(), 'Documents', 'WSR Statements');
+
+// Wait until the engine has actually switched to `id`. setViewAsset only patches activeEntityNum
+// optimistically; the new entity's data arrives on a later broadcast that sets activeEntityData.id.
+// Mirrors the game's own OwnershipGraph fix (poll until the response entityId matches).
+async function waitForEntity(id, timeoutMs = VIEW_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if ((gstate().activeEntityData || {}).id === id) { await sleep(40); return true; }
+        await sleep(50);
+    }
+    return false;
+}
+
+// Flatten a subsidiaries tree to descendant company ids. Children live under `.owners` (the engine's
+// field name for both the ownership and subsidiaries trees); companies have entityId > 10.
+function flattenTreeIds(tree, acc = []) {
+    if (!tree) return acc;
+    for (const child of (tree.owners || [])) {
+        if (typeof child.entityId === 'number' && child.entityId > 10) acc.push(child.entityId);
+        flattenTreeIds(child, acc);
+    }
+    return acc;
+}
 
 function requireGameLoaded(gs) {
     if (!gs || !gs.currentYear) throw new Error('No game loaded - load a save first.');
@@ -79,34 +102,64 @@ async function exportCurrent() {
     return saveWorkbook([ent], `wsr_financials_${monthStr(gs)}_${tag}`);
 }
 
-async function exportPortfolio() {
+async function exportPortfolio(setStatus) {
     const gs0 = gstate();
     requireGameLoaded(gs0);
+    const playerId = gs0.playerId || PLAYER_ID;
     const original = gs0.activeEntityNum;
     const date = monthStr(gs0);
-    const entities = [];
 
-    // Player sheet (view the player so activeEntityPlayerFinancials is populated).
-    await api.setViewAsset(PLAYER_ID); await sleep(SETTLE_MS);
+    // Enumerate every controlled entity: direct holdings (controlledCompanies) PLUS the deeper
+    // subsidiary tree - companies held *through* a controlled company are NOT in controlledCompanies.
+    const ids = [];
+    const addId = (id) => { if (typeof id === 'number' && id > 10 && !ids.includes(id)) ids.push(id); };
+    for (const c of (gs0.controlledCompanies || [])) addId(c.id);
+
+    // View the player (also populates aep for the PLAYER sheet), then read its subsidiaries tree.
+    if (setStatus) setStatus('Mapping holdings...');
+    await api.setViewAsset(playerId);
+    await waitForEntity(playerId);
     let gs = gstate();
     const aep = gs.activeEntityPlayerFinancials || {};
     const pname = gs.playerName || (gs.activeEntityData || {}).name || 'Player';
-    entities.push({ sheet: 'PLAYER', rows: playerRows(aep, gs, pname, date), summary: playerSummary(aep, gs, pname) });
+    try {
+        let tree = null;
+        for (let i = 0; i < 20; i++) {                 // the tree lags too - poll until it's the player's
+            const t = await api.getSubsidiariesTree();
+            if (t && t.entityId === playerId) { tree = t; break; }
+            await sleep(50);
+        }
+        if (tree) for (const id of flattenTreeIds(tree)) addId(id);
+    } catch (e) { console.warn('[wsr-export] subsidiaries tree unavailable:', e); }
 
-    // One sheet per controlled company (flip the view, settle, read).
-    for (const c of (gs0.controlledCompanies || [])) {
-        await api.setViewAsset(c.id); await sleep(SETTLE_MS);
+    const entities = [{ sheet: 'PLAYER', rows: playerRows(aep, gs, pname, date), summary: playerSummary(aep, gs, pname) }];
+    const missed = [];
+    const total = ids.length + 1;
+    let done = 1;
+    if (setStatus) setStatus(`Exporting 1/${total}...`);
+
+    // One sheet per controlled entity - read ONLY after the engine confirms the switch (no stale
+    // reads, no duplicates). Each id is unique already (deduped above).
+    for (const id of ids) {
+        await api.setViewAsset(id);
+        const ok = await waitForEntity(id);
         gs = gstate();
-        const aef = gs.activeEntityFinancials || {};
         const aed = gs.activeEntityData || {};
-        const ind = gs.activeIndustryId ?? -1;
-        const sym = aed.symbol || c.name || String(c.id);
+        done += 1;
+        if (setStatus) setStatus(`Exporting ${done}/${total}...`);
+        if (!ok || aed.id !== id) { missed.push(id); continue; }
+        const aef = gs.activeEntityFinancials || {};
+        const ind = aed.industryId ?? gs.activeIndustryId ?? -1;
+        const sym = aed.symbol || aed.name || String(id);
         entities.push({ sheet: sym, rows: companyRows(aef, aed, ind, date), summary: companySummary(aef, aed, ind) });
     }
 
     // Restore the user's original view.
-    if (original != null) { await api.setViewAsset(original); await sleep(120); }
-    return saveWorkbook(entities, `wsr_financials_${date}`);
+    if (original != null) { await api.setViewAsset(original); await waitForEntity(original); }
+
+    let res = saveWorkbook(entities, `wsr_financials_${date}`);
+    if (missed.length) res += `\n(${missed.length} entit${missed.length === 1 ? 'y' : 'ies'} didn't load in time and were skipped - run it again)`;
+    return res;
 }
 
 // ---- UI ----
@@ -131,7 +184,7 @@ function mkButton(label, handler) {
         const old = b.textContent;
         b.disabled = true; b.textContent = 'Exporting...';
         try {
-            const msg = await handler();
+            const msg = await handler((s) => { b.textContent = s; });
             toast(msg);
         } catch (e) {
             toast('Export failed: ' + (e && e.message ? e.message : String(e)), true);
