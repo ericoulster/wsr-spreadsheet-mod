@@ -20,7 +20,7 @@ const fs = hasRequire ? require('fs') : null;
 const path = hasRequire ? require('path') : null;
 const os = hasRequire ? require('os') : null;
 
-const PLAYER_ID = 2;          // fallback human-player entity id; prefer gameState.playerId
+const PLAYER_ID = api.HUMAN1_ID ?? 2;  // human-player entity id (the game's exported constant); prefer gameState.playerId
 const VIEW_TIMEOUT_MS = 4000; // max wait for a view switch to actually land in the engine
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -112,24 +112,26 @@ async function exportPortfolio(setStatus) {
     // Enumerate every controlled entity: direct holdings (controlledCompanies) PLUS the deeper
     // subsidiary tree - companies held *through* a controlled company are NOT in controlledCompanies.
     const ids = [];
-    const addId = (id) => { if (typeof id === 'number' && id > 10 && !ids.includes(id)) ids.push(id); };
+    const seen = new Set();
+    const addId = (id) => { if (typeof id === 'number' && id > 10 && !seen.has(id)) { seen.add(id); ids.push(id); } };
     for (const c of (gs0.controlledCompanies || [])) addId(c.id);
 
     // View the player (also populates aep for the PLAYER sheet), then read its subsidiaries tree.
     if (setStatus) setStatus('Mapping holdings...');
     await api.setViewAsset(playerId);
-    await waitForEntity(playerId);
+    const onPlayer = await waitForEntity(playerId);
     let gs = gstate();
     const aep = gs.activeEntityPlayerFinancials || {};
     const pname = gs.playerName || (gs.activeEntityData || {}).name || 'Player';
+    let treeOk = false;                  // false => the deep ownership tree couldn't be read (surfaced below)
     try {
         let tree = null;
-        for (let i = 0; i < 20; i++) {                 // the tree lags too - poll until it's the player's
+        for (let i = 0; i < 20 && onPlayer; i++) {     // the tree lags too - poll until it's the player's
             const t = await api.getSubsidiariesTree();
             if (t && t.entityId === playerId) { tree = t; break; }
             await sleep(50);
         }
-        if (tree) for (const id of flattenTreeIds(tree)) addId(id);
+        if (tree) { treeOk = true; for (const id of flattenTreeIds(tree)) addId(id); }
     } catch (e) { console.warn('[wsr-export] subsidiaries tree unavailable:', e); }
 
     const entities = [{ sheet: 'PLAYER', rows: playerRows(aep, gs, pname, date), summary: playerSummary(aep, gs, pname) }];
@@ -158,6 +160,7 @@ async function exportPortfolio(setStatus) {
     if (original != null) { await api.setViewAsset(original); await waitForEntity(original); }
 
     let res = saveWorkbook(entities, `wsr_financials_${date}`);
+    if (!treeOk) res += `\n(couldn't read your full ownership tree - exported direct holdings only; try again)`;
     if (missed.length) res += `\n(${missed.length} entit${missed.length === 1 ? 'y' : 'ies'} didn't load in time and were skipped - run it again)`;
     return res;
 }
@@ -181,8 +184,11 @@ function mkButton(label, handler) {
     b.textContent = label;
     b.style.cssText = 'padding:3px 10px; font-size:12px;';
     b.addEventListener('click', async () => {
+        const bar = document.getElementById('wsr-export-bar');
+        const btns = bar ? [...bar.querySelectorAll('button')] : [b];
         const old = b.textContent;
-        b.disabled = true; b.textContent = 'Exporting...';
+        btns.forEach((x) => { x.disabled = true; });   // lock BOTH buttons: a mid-run click can't grab a flipped-to entity
+        b.textContent = 'Exporting...';
         try {
             const msg = await handler((s) => { b.textContent = s; });
             toast(msg);
@@ -190,7 +196,8 @@ function mkButton(label, handler) {
             toast('Export failed: ' + (e && e.message ? e.message : String(e)), true);
             console.error('[wsr-export]', e);
         } finally {
-            b.disabled = false; b.textContent = old;
+            btns.forEach((x) => { x.disabled = false; });
+            b.textContent = old;
         }
     });
     return b;
