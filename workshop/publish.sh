@@ -68,9 +68,16 @@ open(sys.argv[1], "w").write("\n".join(out) + "\n")
 PYEOF
 
 echo "Publishing to WSR Workshop (visibility=${2:-private}, item id ${PUBID}) ..."
+# Don't let a non-zero SteamCMD exit (it sometimes returns one even on success) abort before we
+# parse + save the id.
+set +e
 OUT="$("$STEAMCMD" +login "$USER_ARG" +workshop_build_item "$VDF" +quit 2>&1 | tee /dev/tty)"
-NEWID="$(printf '%s\n' "$OUT" | grep -oiE 'PublishedFileID[^0-9]*[0-9]+' | grep -oE '[0-9]+' | tail -1)"
-if [ -n "${NEWID:-}" ]; then
+set -e
+# SteamCMD prints "Create new workshop item ( PublishFileID NNNN)" (note: PublishFileID, no "ed");
+# updates don't reprint it, so fall back to the known id.
+NEWID="$(printf '%s\n' "$OUT" | grep -oiE 'Publish(ed)?FileID[^0-9]*[0-9]+' | grep -oE '[0-9]+' | tail -1)"
+[ -z "${NEWID:-}" ] && [ "$PUBID" != "0" ] && NEWID="$PUBID"
+if [ -n "${NEWID:-}" ] && printf '%s' "$OUT" | grep -qi 'Success'; then
     echo "$NEWID" > "$IDFILE"
     echo
     echo "Published. Workshop item id: $NEWID  (saved to workshop/.published-id)"
@@ -79,6 +86,6 @@ if [ -n "${NEWID:-}" ]; then
     echo "To re-publish updates later, just run this script again (it reuses that id)."
 else
     echo
-    echo "No PublishedFileID detected - read the SteamCMD output above for the error (login? rights?)." >&2
+    echo "Could not confirm success - read the SteamCMD output above (login? rights? legal agreement?)." >&2
     exit 1
 fi
