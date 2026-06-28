@@ -208,6 +208,46 @@ export function workbookBuffer(wb) {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
+// ───────────────────────── Tidy ("one row per entity") experiment ─────────────────────────
+// One flat record per entity, merging every raw API field (no curation, no collisions: the data
+// and financial structs share no keys; the few aef/aep overlaps are the same variable). `extra`
+// carries meta (entity_type, save_file, game_date...) and the player's top-level roll-ups.
+export function tidyEntityRecord(entityType, aed, fin, extra) {
+    return Object.assign({ entity_type: entityType }, extra || {}, aed || {}, fin || {});
+}
+
+// Records (arbitrary flat objects, possibly different key sets) -> tidy AoA: `leadCols` first (those
+// that occur), then the sorted union of every other key. Missing cells are '' (NaN once in pandas);
+// nothing is dropped, so the table is lossless and wide.
+export function buildTidyAoa(records, leadCols) {
+    const all = new Set();
+    for (const r of (records || [])) for (const k of Object.keys(r)) all.add(k);
+    const lead = (leadCols || []).filter((c) => all.has(c));
+    const rest = [...all].filter((c) => !lead.includes(c)).sort();
+    const cols = [...lead, ...rest];
+    const aoa = [cols];
+    for (const r of (records || [])) {
+        aoa.push(cols.map((c) => {
+            const v = r[c];
+            return (v === undefined || v === null) ? '' : v;
+        }));
+    }
+    return aoa;
+}
+
+// Build a workbook from raw sheets: [{ name, aoa }]. (The tidy export uses this instead of the
+// statement-per-entity buildWorkbook.)
+export function buildAoaWorkbook(sheets) {
+    const wb = XLSX.utils.book_new();
+    const used = new Set();
+    for (const s of (sheets || [])) {
+        const ws = XLSX.utils.aoa_to_sheet(s.aoa);
+        ws['!cols'] = (s.aoa[0] || []).map((h) => ({ wch: Math.min(28, Math.max(10, String(h).length + 2)) }));
+        XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(s.name, used));
+    }
+    return wb;
+}
+
 // Browser-friendly serialization (Uint8Array) for a Blob download when there is no Node fs.
 export function workbookArray(wb) {
     return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });

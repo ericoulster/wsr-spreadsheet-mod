@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
-    workbookArray, monthStr, parseProjection,
+    workbookArray, monthStr, parseProjection, tidyEntityRecord, buildTidyAoa, buildAoaWorkbook,
 } from '../overlay/js/wsr-export/exporter.js';
 
 let failures = 0;
@@ -81,6 +81,29 @@ ok(pr.some(([k, l]) => k === 'sub' && l.startsWith('TAXABLE INCOME ITEMS')), 'pr
 ok(!pr.some(([, l]) => String(l).includes('does not not take')), 'proj prose disclaimer skipped');
 ok(!pr.some(([, l]) => String(l).includes('PROJECTION FOR CANADIAN')), 'proj report title skipped');
 ok(pr.filter(([k]) => k === 'line' || k === 'total').length === 7, `proj kept every value row, 7 of 7 (got ${pr.filter(([k]) => k === 'line' || k === 'total').length})`);
+
+// ---- 2c. Tidy export: lossless union table, categoricals, NaN where N/A ----
+const playerRec = tidyEntityRecord('player',
+    { id: 2, symbol: 'TYC', name: 'Tycoon', industryId: 0, industryName: '' },
+    { tBills: 100, stocksPortfolioValue: 200, projAnnualCashFlow: 50, borrowRate: 5.5 },
+    { save_file: 'MyGame.DAT', game_date: '2056-03', cash: 1, totalAssets: 300, totalDebt: 0, netWorth: 300 });
+const coRec = tidyEntityRecord('company',
+    { id: 42, symbol: 'RELI', name: 'Reliable', industryId: 2, industryName: 'Insurance' },
+    { tBills: 963, equity: 7449, insurReserves: 3288, totalAssets: 13222 },
+    { save_file: 'MyGame.DAT', game_date: '2056-03' });
+const lead = ['entity_type', 'id', 'symbol', 'name', 'industryId', 'industryName', 'save_file', 'game_date'];
+const taoa = buildTidyAoa([playerRec, coRec], lead);
+const thdr = taoa[0];
+const tcol = (n) => thdr.indexOf(n);
+ok(thdr[0] === 'entity_type', `tidy lead col is entity_type (${thdr[0]})`);
+ok(lead.every((c, i) => thdr[i] === c), 'tidy lead columns kept in requested order');
+ok(tcol('projAnnualCashFlow') >= 0 && tcol('equity') >= 0, 'tidy union keeps both player-only and company-only fields');
+ok(taoa[1][tcol('entity_type')] === 'player' && taoa[2][tcol('entity_type')] === 'company', 'tidy entity_type categorical per row');
+ok(taoa[1][tcol('equity')] === '' && taoa[2][tcol('projAnnualCashFlow')] === '', 'tidy blank (NaN) where a field does not apply');
+ok(taoa[1][tcol('tBills')] === 100 && taoa[2][tcol('tBills')] === 963, 'tidy shared column filled from each source');
+const twb = buildAoaWorkbook([{ name: 'entities', aoa: taoa }]);
+const tbuf = workbookBuffer(twb);
+ok(tbuf[0] === 0x50 && tbuf[1] === 0x4b, 'tidy workbook is a valid xlsx');
 
 // ---- 3. Assemble + write a workbook (exercises SheetJS xlsx generation) ----
 const entities = [

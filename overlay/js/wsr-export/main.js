@@ -12,7 +12,7 @@
 import * as api from '../api.js';
 import {
     companyRows, playerRows, companySummary, playerSummary, buildWorkbook, workbookBuffer,
-    workbookArray, monthStr, parseProjection,
+    workbookArray, monthStr, parseProjection, tidyEntityRecord, buildTidyAoa, buildAoaWorkbook,
 } from './exporter.js';
 
 const hasRequire = typeof require !== 'undefined';
@@ -105,8 +105,7 @@ function entityFrom(gs) {
 
 // Save the workbook. Desktop (Electron, Node available) -> write to ~/Documents/WSR Statements.
 // Browser mode (no Node) -> trigger a browser download. Returns a user-facing status string.
-function saveWorkbook(entities, baseName) {
-    const wb = buildWorkbook(entities);
+function saveBuiltWorkbook(wb, baseName) {
     const filename = `${baseName}.xlsx`;
     if (fs && path && os) {
         const dir = outDir();
@@ -125,6 +124,19 @@ function saveWorkbook(entities, baseName) {
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
     return 'Downloaded: ' + filename + ' (check your browser downloads)';
+}
+function saveWorkbook(entities, baseName) { return saveBuiltWorkbook(buildWorkbook(entities), baseName); }
+
+// Best-effort current save name: the running game doesn't expose the loaded slot, so use the
+// most-recently-modified save file from the saves list.
+async function currentSaveName() {
+    try {
+        const saves = await api.listSaves();
+        if (Array.isArray(saves) && saves.length) {
+            return saves.reduce((a, b) => ((b.modifiedMs || 0) > (a.modifiedMs || 0) ? b : a)).filename || '';
+        }
+    } catch (e) { console.warn('[wsr-export] listSaves failed', e); }
+    return '';
 }
 
 async function exportCurrent(setStatus) {
@@ -204,6 +216,86 @@ async function exportPortfolio(setStatus) {
     return res;
 }
 
+// Tidy ("one row per entity") export: a single workbook with an `entities` sheet (every raw API
+// field per entity, wide, NaN where N/A) and a `holdings` sheet (one row per position - stocks AND
+// bonds, since portHoldings carries assetType). Encodes the in-game date and the save-file name.
+async function exportTidy(setStatus) {
+    const gs0 = gstate();
+    requireGameLoaded(gs0);
+    const playerId = gs0.playerId || PLAYER_ID;
+    const original = gs0.activeEntityNum;
+    const date = monthStr(gs0);
+    if (setStatus) setStatus('Reading save info...');
+    const meta = { save_file: await currentSaveName(), game_date: date, game_year: gs0.currentYear, game_month: gs0.currentMonth };
+
+    // Enumerate entities (direct holdings + the subsidiary tree), same as Export Portfolio.
+    const ids = [];
+    const seen = new Set();
+    const addId = (id) => { if (typeof id === 'number' && id > 10 && !seen.has(id)) { seen.add(id); ids.push(id); } };
+    for (const c of (gs0.controlledCompanies || [])) addId(c.id);
+
+    if (setStatus) setStatus('Mapping holdings...');
+    await api.setViewAsset(playerId);
+    const onPlayer = await waitForEntity(playerId);
+    let gs = gstate();
+    let treeOk = false;
+    try {
+        let tree = null;
+        for (let i = 0; i < 20 && onPlayer; i++) {
+            const t = await api.getSubsidiariesTree();
+            if (t && t.entityId === playerId) { tree = t; break; }
+            await sleep(50);
+        }
+        if (tree) { treeOk = true; for (const id of flattenTreeIds(tree)) addId(id); }
+    } catch (e) { console.warn('[wsr-export] subsidiaries tree unavailable:', e); }
+
+    const entityRecords = [];
+    const holdingRecords = [];
+    const capture = (g, isPlayer) => {
+        const aed = g.activeEntityData || {};
+        if (isPlayer) {
+            const aep = g.activeEntityPlayerFinancials || {};
+            const roll = { cash: g.cash, totalAssets: g.totalAssets, totalDebt: g.totalDebt, netWorth: g.netWorth };
+            entityRecords.push(tidyEntityRecord('player', aed, aep, Object.assign({}, meta, roll)));
+        } else {
+            entityRecords.push(tidyEntityRecord('company', aed, g.activeEntityFinancials || {}, meta));
+        }
+        const owner = { owner_entity_type: isPlayer ? 'player' : 'company', owner_id: aed.id, owner_symbol: aed.symbol || (isPlayer ? 'PLAYER' : '') };
+        for (const h of (g.portHoldings || [])) {
+            holdingRecords.push(Object.assign({ save_file: meta.save_file, game_date: date }, owner, h));
+        }
+    };
+
+    capture(gs, true);               // player (already in view)
+    const missed = [];
+    const total = ids.length + 1;
+    let done = 1;
+    if (setStatus) setStatus(`Reading 1/${total}...`);
+
+    for (const id of ids) {
+        await api.setViewAsset(id);
+        const ok = await waitForEntity(id);
+        gs = gstate();
+        done += 1;
+        if (setStatus) setStatus(`Reading ${done}/${total}...`);
+        if (!ok || (gs.activeEntityData || {}).id !== id) { missed.push(id); continue; }
+        capture(gs, false);
+    }
+
+    if (original != null) { await api.setViewAsset(original); await waitForEntity(original); }
+
+    const entLead = ['entity_type', 'id', 'symbol', 'name', 'industryId', 'industryName', 'save_file', 'game_date', 'game_year', 'game_month'];
+    const holdLead = ['owner_entity_type', 'owner_id', 'owner_symbol', 'assetType', 'symbol', 'name', 'save_file', 'game_date'];
+    const sheets = [{ name: 'entities', aoa: buildTidyAoa(entityRecords, entLead) }];
+    if (holdingRecords.length) sheets.push({ name: 'holdings', aoa: buildTidyAoa(holdingRecords, holdLead) });
+
+    let res = saveBuiltWorkbook(buildAoaWorkbook(sheets), `wsr_tidy_${date}`);
+    res += `\n(${entityRecords.length} entities, ${holdingRecords.length} holdings)`;
+    if (!treeOk) res += `\n(couldn't read your full ownership tree - direct holdings only; try again)`;
+    if (missed.length) res += `\n(${missed.length} entit${missed.length === 1 ? 'y' : 'ies'} didn't load in time - run it again)`;
+    return res;
+}
+
 // ---- UI ----
 
 function toast(msg, isError) {
@@ -250,6 +342,7 @@ function injectButtons() {
         display:none; gap:6px; align-items:center;`;
     bar.appendChild(mkButton('Export This', exportCurrent));
     bar.appendChild(mkButton('Export Portfolio', exportPortfolio));
+    bar.appendChild(mkButton('Export Tidy', exportTidy));
     document.body.appendChild(bar);
 
     // Only show in-game: mirror the app's own gameLoaded flag (app.js renders GameUI vs MainMenu
