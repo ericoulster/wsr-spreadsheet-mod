@@ -38,10 +38,8 @@ CHANGENOTE="${CHANGENOTE:-Update}" python3 - "$VDF" <<'PYEOF'
 import os, sys
 desc = """Adds two in-game buttons that export your financial statements to an Excel ([b].xlsx[/b]) file, read live from the game with one click.
 
-[b]Export This[/b] - the entity you're currently viewing (you, or a company).
-[b]Export Portfolio[/b] - you plus every company you control.
-
-Each workbook has a Summary sheet plus one sheet per entity: the balance sheet (assets / liabilities / equity, using the game's own industry totals so it matches the Financials screen, with an Assets - Liabilities - Equity check row) and the cash flow statement. All figures in $ millions.
+[b]Export This[/b] - the entity you're currently viewing (you, or a company), as a readable financial statement: balance sheet (assets / liabilities / equity, using the game's own industry totals so it matches the Financials screen) plus the cash flow and the itemized 3-month cash-flow projection.
+[b]Export Portfolio[/b] - you plus everything you own (any stake), as a single tidy data table: one row per entity with every value the game exposes, plus a holdings sheet (one row per position - stocks and bonds). Ready for Excel or pandas.
 
 [b]Where the file goes[/b]
 [list]
