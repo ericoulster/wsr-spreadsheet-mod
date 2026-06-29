@@ -139,6 +139,10 @@ async function currentSaveName() {
     return '';
 }
 
+// Filename-safe save tag (drop the .DAT extension + illegal/space chars) so each save's exports are
+// distinct files in the output folder - lets you compare across saves.
+const saveTag = (name) => String(name || 'save').replace(/\.dat$/i, '').replace(/[\\/?*[\]:\s]+/g, '_').slice(0, 40) || 'save';
+
 async function exportCurrent(setStatus) {
     const gs = gstate();
     requireGameLoaded(gs);
@@ -147,7 +151,7 @@ async function exportCurrent(setStatus) {
     if (setStatus) setStatus('Reading cash flow...');
     await appendProjection(ent, isP, (gs.activeEntityData || {}).name || gs.playerName);
     const tag = isP ? 'player' : ent.sheet;
-    return saveWorkbook([ent], `wsr_financials_${monthStr(gs)}_${tag}`);
+    return saveWorkbook([ent], `wsr_${saveTag(await currentSaveName())}_${monthStr(gs)}_${tag}`);
 }
 
 // Bulk "Export Portfolio" - tidy / one-row-per-entity. A single workbook with an `entities` sheet
@@ -225,7 +229,7 @@ async function exportPortfolio(setStatus) {
     const sheets = [{ name: 'entities', aoa: buildTidyAoa(entityRecords, entLead) }];
     if (holdingRecords.length) sheets.push({ name: 'holdings', aoa: buildTidyAoa(holdingRecords, holdLead) });
 
-    let res = saveBuiltWorkbook(buildAoaWorkbook(sheets), `wsr_tidy_${date}`);
+    let res = saveBuiltWorkbook(buildAoaWorkbook(sheets), `wsr_portfolio_${saveTag(meta.save_file)}_${date}`);
     res += `\n(${entityRecords.length} entities, ${holdingRecords.length} holdings)`;
     if (!treeOk) res += `\n(couldn't read your full ownership tree - direct holdings only; try again)`;
     if (missed.length) res += `\n(${missed.length} entit${missed.length === 1 ? 'y' : 'ies'} didn't load in time - run it again)`;
