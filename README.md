@@ -4,13 +4,15 @@ A Wall $treet Raider mod that adds two floating **Export to Excel** buttons in-g
 it produces your balance sheets + cash flow statements as an `.xlsx` workbook - read live from the
 game, no external tool. It is read-only: it never changes your game.
 
-- **Export This** - exports the entity you're currently viewing (you, or a company). Instant.
-- **Export Portfolio** - exports you plus every company you control. The game has no silent read of
-  other entities, so this briefly flips the view through each controlled company and restores yours.
+- **Export This** - the entity you're currently viewing (you, or a company), as a readable financial
+  statement: balance sheet, cash flow, and the itemized 3-month cash-flow projection. Instant.
+- **Export Portfolio** - you plus everything you own (any stake), as a single **tidy data table**:
+  one row per entity with every field the game exposes per entity (wide; blank = not applicable),
+  plus a `holdings` sheet (one row per position - stocks **and** bonds). It flips the view through
+  each entity to read it, and encodes the in-game date and save-file name. Built for pandas/analysis.
 
-Each workbook has a Summary sheet plus one sheet per entity; company balance sheets use the game's
-own industry-specific `Total Liabilities` formula, so the numbers match the Financials screen, with
-an `Assets - Liabilities - Equity` check row.
+Export This statements use the game's own industry-specific `Total Liabilities` formula, so the
+numbers match the Financials screen, with an `Assets - Liabilities - Equity` check row.
 
 This is the in-game counterpart to the standalone CLI
 ([wsr-spreadsheet-generator](https://github.com/ericoulster/wsr-spreadsheet-generator)).

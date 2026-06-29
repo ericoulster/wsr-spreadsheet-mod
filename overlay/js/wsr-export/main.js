@@ -150,76 +150,12 @@ async function exportCurrent(setStatus) {
     return saveWorkbook([ent], `wsr_financials_${monthStr(gs)}_${tag}`);
 }
 
+// Bulk "Export Portfolio" - tidy / one-row-per-entity. A single workbook with an `entities` sheet
+// (every raw API field per entity, wide, NaN where N/A) and a `holdings` sheet (one row per position
+// - stocks AND bonds, since portHoldings carries assetType). Encodes the in-game date + save-file
+// name. (Replaces the former statement-per-sheet bulk export; single-entity statements are still
+// available via "Export This".)
 async function exportPortfolio(setStatus) {
-    const gs0 = gstate();
-    requireGameLoaded(gs0);
-    const playerId = gs0.playerId || PLAYER_ID;
-    const original = gs0.activeEntityNum;
-    const date = monthStr(gs0);
-
-    // Enumerate every controlled entity: direct holdings (controlledCompanies) PLUS the deeper
-    // subsidiary tree - companies held *through* a controlled company are NOT in controlledCompanies.
-    const ids = [];
-    const seen = new Set();
-    const addId = (id) => { if (typeof id === 'number' && id > 10 && !seen.has(id)) { seen.add(id); ids.push(id); } };
-    for (const c of (gs0.controlledCompanies || [])) addId(c.id);
-
-    // View the player (also populates aep for the PLAYER sheet), then read its subsidiaries tree.
-    if (setStatus) setStatus('Mapping holdings...');
-    await api.setViewAsset(playerId);
-    const onPlayer = await waitForEntity(playerId);
-    let gs = gstate();
-    const aep = gs.activeEntityPlayerFinancials || {};
-    const pname = gs.playerName || (gs.activeEntityData || {}).name || 'Player';
-    let treeOk = false;                  // false => the deep ownership tree couldn't be read (surfaced below)
-    try {
-        let tree = null;
-        for (let i = 0; i < 20 && onPlayer; i++) {     // the tree lags too - poll until it's the player's
-            const t = await api.getSubsidiariesTree();
-            if (t && t.entityId === playerId) { tree = t; break; }
-            await sleep(50);
-        }
-        if (tree) { treeOk = true; for (const id of flattenTreeIds(tree)) addId(id); }
-    } catch (e) { console.warn('[wsr-export] subsidiaries tree unavailable:', e); }
-
-    const entities = [{ sheet: 'PLAYER', rows: playerRows(aep, gs, pname, date), summary: playerSummary(aep, gs, pname) }];
-    await appendProjection(entities[0], true, pname);   // itemized cash-flow projection (still viewing the player)
-    const missed = [];
-    const total = ids.length + 1;
-    let done = 1;
-    if (setStatus) setStatus(`Exporting 1/${total}...`);
-
-    // One sheet per controlled entity - read ONLY after the engine confirms the switch (no stale
-    // reads, no duplicates). Each id is unique already (deduped above).
-    for (const id of ids) {
-        await api.setViewAsset(id);
-        const ok = await waitForEntity(id);
-        gs = gstate();
-        const aed = gs.activeEntityData || {};
-        done += 1;
-        if (setStatus) setStatus(`Exporting ${done}/${total}...`);
-        if (!ok || aed.id !== id) { missed.push(id); continue; }
-        const aef = gs.activeEntityFinancials || {};
-        const ind = aed.industryId ?? gs.activeIndustryId ?? -1;
-        const sym = aed.symbol || aed.name || String(id);
-        const entity = { sheet: sym, rows: companyRows(aef, aed, ind, date), summary: companySummary(aef, aed, ind) };
-        await appendProjection(entity, false, aed.name || sym);   // itemized cash-flow projection (still in view)
-        entities.push(entity);
-    }
-
-    // Restore the user's original view.
-    if (original != null) { await api.setViewAsset(original); await waitForEntity(original); }
-
-    let res = saveWorkbook(entities, `wsr_financials_${date}`);
-    if (!treeOk) res += `\n(couldn't read your full ownership tree - exported direct holdings only; try again)`;
-    if (missed.length) res += `\n(${missed.length} entit${missed.length === 1 ? 'y' : 'ies'} didn't load in time and were skipped - run it again)`;
-    return res;
-}
-
-// Tidy ("one row per entity") export: a single workbook with an `entities` sheet (every raw API
-// field per entity, wide, NaN where N/A) and a `holdings` sheet (one row per position - stocks AND
-// bonds, since portHoldings carries assetType). Encodes the in-game date and the save-file name.
-async function exportTidy(setStatus) {
     const gs0 = gstate();
     requireGameLoaded(gs0);
     const playerId = gs0.playerId || PLAYER_ID;
@@ -342,7 +278,6 @@ function injectButtons() {
         display:none; gap:6px; align-items:center;`;
     bar.appendChild(mkButton('Export This', exportCurrent));
     bar.appendChild(mkButton('Export Portfolio', exportPortfolio));
-    bar.appendChild(mkButton('Export Tidy', exportTidy));
     document.body.appendChild(bar);
 
     // Only show in-game: mirror the app's own gameLoaded flag (app.js renders GameUI vs MainMenu
